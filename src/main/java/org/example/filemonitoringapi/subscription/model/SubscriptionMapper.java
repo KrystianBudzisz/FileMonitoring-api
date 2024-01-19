@@ -1,26 +1,23 @@
-package org.example.filemonitoringapi.model;
+package org.example.filemonitoringapi.subscription.model;
 
-import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
-@AllArgsConstructor
+
 @Component
 public class SubscriptionMapper {
 
-    // Konwersja z CreateSubscriptionCommand na Subscription
-    public  Subscription fromCreateCommand(CreateSubscriptionCommand command) {
-        Subscription subscription = new Subscription();
-        subscription.setFilePath(command.getFilePath());
-        subscription.setEmail(command.getEmail());
-        subscription.setJobId(command.getJobId());
-        return subscription;
+    public Subscription fromCreateCommand(CreateSubscriptionCommand command) {
+        return Subscription.builder()
+                .filePath(command.getFilePath())
+                .email(command.getEmail())
+                .build();
     }
 
-    // Konwersja z Subscription na SubscriptionDto
-    public  SubscriptionDto toDTO(Subscription subscription) {
-        SubscriptionDto dto = new SubscriptionDto();
-        dto.setFilePath(subscription.getFilePath());
-        dto.setEmail(subscription.getEmail());
-        dto.setJobId(subscription.getJobId());
-        return dto;
+    public SubscriptionDto toDTO(Subscription subscription) {
+        return SubscriptionDto.builder()
+                .filePath(subscription.getFilePath())
+                .email(subscription.getEmail())
+                .jobId(subscription.getJobId())
+                .active(subscription.isActive())
+                .build();
     }
 }

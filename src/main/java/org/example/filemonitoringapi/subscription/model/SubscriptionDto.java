@@ -1,4 +1,4 @@
-package org.example.filemonitoringapi.model;
+package org.example.filemonitoringapi.subscription.model;
 
 import lombok.*;
 

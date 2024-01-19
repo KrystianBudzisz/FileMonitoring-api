@@ -1,16 +1,11 @@
-package org.example.filemonitoringapi.model;
+package org.example.filemonitoringapi.subscription.model;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import jakarta.persistence.*;
+import lombok.*;
 
 @Getter
 @Setter
+@Builder
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
@@ -23,5 +18,8 @@ public class Subscription {
     private String email;
     private String jobId;
     private boolean active;
+
+    @Version
+    private Long version;
 
 }

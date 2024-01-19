@@ -1,0 +1,4 @@
+mleko 30
+ryz 20
+pomidory 10
+jajka 15

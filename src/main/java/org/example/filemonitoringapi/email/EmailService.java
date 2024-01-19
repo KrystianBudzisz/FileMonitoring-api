@@ -1,4 +1,4 @@
-package org.example.filemonitoringapi;
+package org.example.filemonitoringapi.email;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.SimpleMailMessage;
