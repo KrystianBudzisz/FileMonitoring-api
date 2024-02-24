@@ -15,6 +15,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -46,27 +48,26 @@ public class SubscriptionControllerTest {
     @Test
     @WithMockUser
     public void testFollowFile() throws Exception {
-        Subscription subscription = new Subscription();
-        subscription.setFilePath("src/main/resources/zakupy.txt");
-        subscription.setEmail("test@example.com");
-        subscription.setActive(true);
-        subscription.setJobId(UUID.randomUUID().toString());
-
-        Subscription savedSubscription = subscriptionRepository.save(subscription);
-
-        Subscription retrievedSubscription = subscriptionRepository.findById(savedSubscription.getId()).orElse(null);
+        CreateSubscriptionCommand command = new CreateSubscriptionCommand();
+        command.setFilePath("src/main/resources/zakupy.txt");
+        command.setEmail("test@example.com");
 
         mockMvc.perform(post("/api/subscriptions/follow")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(savedSubscription)))
+                        .content(objectMapper.writeValueAsString(command)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.email").value("test@example.com"));
+                .andExpect(jsonPath("$.email").value("test@example.com"))
+                .andExpect(jsonPath("$.filePath").value("src/main/resources/zakupy.txt"))
+                .andExpect(jsonPath("$.active").value(true));
 
-        assertNotNull(retrievedSubscription);
-        assertEquals("test@example.com", retrievedSubscription.getEmail());
-        assertEquals("src/main/resources/zakupy.txt", retrievedSubscription.getFilePath());
-        assertTrue(retrievedSubscription.isActive());
+        // Sprawdzenie, czy dane zostały zapisane w bazie danych
+        List<Subscription> subscriptions = subscriptionRepository.findAll();
+        assertFalse(subscriptions.isEmpty());
+        assertEquals("test@example.com", subscriptions.get(0).getEmail());
+        assertEquals("src/main/resources/zakupy.txt", subscriptions.get(0).getFilePath());
+        assertTrue(subscriptions.get(0).isActive());
     }
+
 
 
     @Test
@@ -85,7 +86,6 @@ public class SubscriptionControllerTest {
     }
 
     @Test
-    @WithMockUser
     public void testUnfollowFile() throws Exception {
         Subscription subscription = new Subscription();
         subscription.setFilePath("src/main/resources/zakupy.txt");
@@ -95,13 +95,14 @@ public class SubscriptionControllerTest {
 
         Subscription savedSubscription = subscriptionRepository.save(subscription);
 
-        mockMvc.perform(delete("/api/subscriptions/unfollow/" + savedSubscription.getJobId()))
-                .andExpect(status().isOk())
-                .andExpect(content().string("Pomyślnie anulowano śledzenie pliku"));
+        mockMvc.perform(delete("/api/subscriptions/{jobId}/unfollow", savedSubscription.getJobId()))
+                .andExpect(status().isOk());
+
+        Optional<Subscription> subscriptions = subscriptionRepository.findByJobId(savedSubscription.getJobId());
+        assertFalse(subscriptions.isPresent());
     }
 
     @Test
-    @WithMockUser
     public void testGetSubscriptionStatus() throws Exception {
         Subscription subscription = new Subscription();
         subscription.setFilePath("src/main/resources/zakupy.txt");
@@ -111,13 +112,12 @@ public class SubscriptionControllerTest {
 
         Subscription savedSubscription = subscriptionRepository.save(subscription);
 
-        mockMvc.perform(get("/api/subscriptions/status/" + savedSubscription.getJobId()))
+        mockMvc.perform(get("/api/subscriptions/{jobId}/status", savedSubscription.getJobId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.jobId").value(savedSubscription.getJobId()));
+                .andExpect(content().string("true"));
     }
 
     @Test
-    @WithMockUser
     public void testGetAllSubscriptions() throws Exception {
         Subscription subscription1 = new Subscription();
         subscription1.setFilePath("src/main/resources/zakupy.txt");

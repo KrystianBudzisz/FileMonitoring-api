@@ -24,10 +24,14 @@ public class FileChange {
     private String filePath;
     private String content;
     private LocalDateTime changeTime;
+    private LocalDateTime lastNotificationSent;
 
-    public FileChange(String filePath, String content, LocalDateTime changeTime) {
+
+
+    public FileChange(String filePath, String content, LocalDateTime changeTime, LocalDateTime lastNotificationSent) {
         this.filePath = filePath;
         this.content = content;
         this.changeTime = changeTime;
+        this.lastNotificationSent = lastNotificationSent;
     }
 }

@@ -3,6 +3,8 @@ package org.example.filemonitoringapi.subscription.model;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDateTime;
+
 @Getter
 @Setter
 @Builder
@@ -21,5 +23,7 @@ public class Subscription {
 
     @Version
     private Long version;
+
+
 
 }

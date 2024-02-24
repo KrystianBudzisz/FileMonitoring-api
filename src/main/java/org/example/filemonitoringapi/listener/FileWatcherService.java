@@ -1,5 +1,6 @@
 package org.example.filemonitoringapi.listener;
 
+import lombok.AllArgsConstructor;
 import org.example.filemonitoringapi.email.EmailService;
 import org.example.filemonitoringapi.exception.FileReadException;
 import org.example.filemonitoringapi.exception.FileWatcherRegistrationException;
@@ -9,10 +10,11 @@ import org.example.filemonitoringapi.subscription.SubscriptionRepository;
 import org.example.filemonitoringapi.subscription.model.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.LocalDateTime;
@@ -24,86 +26,73 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
+@AllArgsConstructor
 @Service
 public class FileWatcherService {
     private final Logger logger = LoggerFactory.getLogger(FileWatcherService.class);
-
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    private final ExecutorService executor = Executors.newCachedThreadPool();
     private final Map<String, WatchService> watchServices = new ConcurrentHashMap<>();
-    @Autowired
     private EmailService emailService;
-    @Autowired
     private SubscriptionRepository subscriptionRepository;
-    @Autowired
     private FileChangeRepository fileChangeRepository;
+
 
     public void registerFileWatcher(Subscription subscription) throws FileWatcherRegistrationException {
         String filePath = subscription.getFilePath();
         Path path = Paths.get(filePath).getParent();
+        if (!watchServices.containsKey(filePath)) {
+            try {
+                WatchService watchService = FileSystems.getDefault().newWatchService();
+                path.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+                watchServices.put(filePath, watchService);
 
-        synchronized (this) {
-            if (!watchServices.containsKey(filePath)) {
-                try {
-                    WatchService watchService = FileSystems.getDefault().newWatchService();
-                    path.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
-                    watchServices.put(filePath, watchService);
+                executor.submit(() -> watchFileChanges(filePath, watchService));
+                subscriptionRepository.save(subscription);
+                String initialContent = readFileContent(filePath);
 
-                    executor.submit(() -> watchFileChanges(filePath, watchService));
-                    subscriptionRepository.save(subscription);
+                FileChange initialChange = new FileChange(filePath, initialContent, LocalDateTime.now(), LocalDateTime.now());
+                fileChangeRepository.save(initialChange);
 
-                    String initialContent = readFileContent(filePath);
-                    if (initialContent != null) {
-                        fileChangeRepository.save(new FileChange(filePath, initialContent, LocalDateTime.now()));
-                        String emailBody = generateInitialEmailBody(filePath, initialContent);
-                        emailService.sendEmail(subscription.getEmail(), "Rozpoczęcie monitorowania pliku: " + filePath, emailBody);
-                    }
-                } catch (IOException e) {
-                    // Logowanie błędu
-                    logger.error("Błąd podczas rejestracji FileWatcher dla: " + filePath, e);
-                    throw new FileWatcherRegistrationException("Błąd podczas rejestracji FileWatcher dla: " + filePath, e);
-                } catch (FileReadException e) {
-                    // Logowanie błędu
-                    logger.error("Błąd podczas odczytu pliku: " + filePath, e);
-                    throw new FileWatcherRegistrationException("Błąd podczas odczytu pliku: " + filePath, e);
-                }
+            } catch (IOException e) {
+                throw new FileWatcherRegistrationException("Błąd podczas rejestracji FileWatcher dla: " + filePath, e);
+            } catch (FileReadException e) {
+                throw new FileWatcherRegistrationException("Błąd podczas odczytu pliku: " + filePath, e);
             }
         }
-    }
-
-    public WatchService getWatchService(String filePath) {
-        return watchServices.get(filePath);
     }
 
 
     public void unregisterFileWatcher(Subscription subscription) {
         if (subscription != null) {
             String filePath = subscription.getFilePath();
-            synchronized (this) {
-                WatchService watchService = watchServices.get(filePath);
-                if (watchService != null) {
-                    try {
-                        watchService.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                    watchServices.remove(filePath);
+
+            WatchService watchService = watchServices.get(filePath);
+            if (watchService != null) {
+                try {
+                    watchService.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
+                watchServices.remove(filePath);
             }
+
             subscriptionRepository.delete(subscription);
         }
     }
-
-
-    private void watchFileChanges(String filePath, WatchService watchService) {
+    @Async
+    public void watchFileChanges(String filePath, WatchService watchService) {
         while (!Thread.currentThread().isInterrupted()) {
             WatchKey key;
             try {
                 key = watchService.take();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                logger.info("Wątek monitorujący zmiany plików został przerwany.");
                 return;
             } catch (ClosedWatchServiceException e) {
+                logger.info("Serwis WatchService został zamknięty.");
                 return;
             }
 
@@ -112,44 +101,76 @@ public class FileWatcherService {
 
                 if (kind == StandardWatchEventKinds.OVERFLOW) {
                     continue;
-                } else if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
-                    handleFileModification(filePath);
+                }
+
+                try {
+                    if (kind == StandardWatchEventKinds.ENTRY_MODIFY) {
+                        handleFileModification(filePath);
+                    }
+                } catch (Exception e) {
+                    logger.error("Błąd podczas przetwarzania zmiany pliku: " + filePath, e);
                 }
             }
 
             boolean valid = key.reset();
             if (!valid) {
+                logger.info("Klucz WatchService stał się nieważny.");
                 break;
             }
         }
     }
 
+
     private void handleFileModification(String filePath) {
         try {
             String currentContent = readFileContent(filePath);
-            if (currentContent != null) {
-                Optional<FileChange> lastChange = fileChangeRepository.findTopByFilePathOrderByChangeTimeDesc(filePath);
-                String lastKnownChangeContent = lastChange.isPresent() ? lastChange.get().getContent() : "";
+            Optional<FileChange> lastChange = fileChangeRepository.findTopByFilePathOrderByChangeTimeDesc(filePath);
+            String lastKnownChangeContent = lastChange.map(FileChange::getContent).orElse("");
 
-                String newChanges = extractNewChanges(lastKnownChangeContent, currentContent);
-                if (!newChanges.isEmpty()) {
-                    FileChange change = new FileChange(filePath, currentContent, LocalDateTime.now());
-                    fileChangeRepository.save(change);
-
-                    sendNotifications(filePath, newChanges);
-                }
+            String newChanges = extractNewChanges(lastKnownChangeContent, currentContent);
+            if (!newChanges.isEmpty()) {
+                LocalDateTime now = LocalDateTime.now();
+                FileChange change = new FileChange(filePath, newChanges, now, null);
+                fileChangeRepository.save(change);
             }
         } catch (FileReadException e) {
-            // Logowanie błędu
             logger.error("Błąd podczas obsługi modyfikacji pliku: " + filePath, e);
         }
     }
 
+
+    @Scheduled(cron = "0 0 12 * * ?")
+    public void sendPendingNotifications() {
+        List<FileChange> pendingChanges = fileChangeRepository.findByLastNotificationSentIsNull();
+        Map<String, List<FileChange>> changesByFilePath = pendingChanges.stream()
+                .collect(Collectors.groupingBy(FileChange::getFilePath));
+
+        changesByFilePath.forEach((filePath, changes) -> {
+            List<Subscription> activeSubscriptions = subscriptionRepository.findByFilePathAndActive(filePath, true);
+
+            activeSubscriptions.forEach(subscription -> {
+                String changesContent = changes.stream()
+                        .map(FileChange::getContent)
+                        .collect(Collectors.joining("\n"));
+                String emailBody = generateEmailBody(filePath, changesContent);
+                emailService.sendEmail(subscription.getEmail(), "Zmiana w pliku: " + filePath, emailBody);
+
+                changes.forEach(change -> {
+                    change.setLastNotificationSent(LocalDateTime.now());
+                    fileChangeRepository.save(change);
+                });
+
+            });
+        });
+    }
+
+
     private String readFileContent(String filePath) throws FileReadException {
-        try {
-            return Files.readString(Paths.get(filePath));
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
+            return reader.lines()
+                    .collect(Collectors.joining(System.lineSeparator()));
         } catch (IOException e) {
-            throw new FileReadException("Błąd podczas odczytu pliku: " + filePath, e);
+            throw new FileReadException("Nie udało się odczytać zawartości pliku z: " + filePath, e);
         }
     }
 
@@ -168,48 +189,6 @@ public class FileWatcherService {
         return String.join("\n", newLines);
     }
 
-
-    private String generateInitialEmailBody(String filePath, String initialContent) {
-        LocalDateTime now = LocalDateTime.now();
-        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        return "Rozpoczęłaś/eś nasłuchiwanie pliku " + filePath + " dnia " + now.format(formatter) + ". Początkowa zawartość pliku:\n" + initialContent;
-    }
-
-    private void sendNotifications(String filePath, String changes) {
-        List<Subscription> subscriptions = subscriptionRepository.findByFilePath(filePath);
-        for (Subscription sub : subscriptions) {
-            if (sub.isActive()) {
-                String emailBody = generateEmailBody(filePath, changes);
-                emailService.sendEmail(sub.getEmail(), "Zmiana w pliku: " + filePath, emailBody);
-            }
-        }
-    }
-
-    @Scheduled(fixedRate = 5000)
-    public void checkForFileChangesAndSendEmails() {
-        List<Subscription> subscriptions = subscriptionRepository.findAll();
-        for (Subscription subscription : subscriptions) {
-            if (subscription.isActive()) {
-                String filePath = subscription.getFilePath();
-                try {
-                    String currentContent = readFileContent(filePath);
-                    Optional<FileChange> lastChange = fileChangeRepository.findTopByFilePathOrderByChangeTimeDesc(filePath);
-                    String lastKnownChangeContent = lastChange.isPresent() ? lastChange.get().getContent() : "";
-
-                    String newChanges = extractNewChanges(lastKnownChangeContent, currentContent);
-                    if (!newChanges.isEmpty()) {
-                        FileChange change = new FileChange(filePath, currentContent, LocalDateTime.now());
-                        fileChangeRepository.save(change);
-
-                        sendNotifications(filePath, newChanges);
-                    }
-                } catch (FileReadException e) {
-                    // Logowanie błędu
-                    logger.error("Błąd podczas sprawdzania zmian w pliku: " + filePath, e);
-                }
-            }
-        }
-    }
 
     private String generateEmailBody(String filePath, String changes) {
         LocalDateTime now = LocalDateTime.now();
