@@ -8,9 +8,10 @@ import java.util.Optional;
 
 
 public interface SubscriptionRepository extends JpaRepository<Subscription, Long> {
-    List<Subscription> findByFilePath(String filePath);
-
     Optional<Subscription> findByJobId(String jobId);
+
+    List<Subscription> findByFilePathAndActive(String filePath, boolean active);
+
 
 }
 

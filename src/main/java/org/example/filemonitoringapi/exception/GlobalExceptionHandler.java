@@ -35,4 +35,19 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handleException(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Wewnętrzny błąd serwera.");
     }
+
+    @ExceptionHandler(SubscriptionNotFoundException.class)
+    public ResponseEntity<String> handleSubscriptionNotFoundException(SubscriptionNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Nie znaleziono subskrypcji: " + ex.getMessage());
+    }
+    @ExceptionHandler(SubscriptionCreationException.class)
+    public ResponseEntity<String> handleSubscriptionCreationException(SubscriptionCreationException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Błąd podczas tworzenia subskrypcji: " + ex.getMessage());
+    }
+
+    @ExceptionHandler(EmailSendingException.class)
+    public ResponseEntity<String> handleEmailSendingException(EmailSendingException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body("Nie udało się wysłać e-maila: " + ex.getMessage());
+    }
+
 }

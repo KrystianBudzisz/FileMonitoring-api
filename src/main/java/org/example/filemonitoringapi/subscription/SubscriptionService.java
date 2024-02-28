@@ -1,22 +1,19 @@
 package org.example.filemonitoringapi.subscription;
 
-import jakarta.persistence.EntityNotFoundException;
 import lombok.AllArgsConstructor;
-import org.example.filemonitoringapi.exception.FileReadException;
 import org.example.filemonitoringapi.exception.FileWatcherRegistrationException;
-import org.example.filemonitoringapi.listener.FileWatcherService;
+import org.example.filemonitoringapi.exception.SubscriptionCreationException;
+import org.example.filemonitoringapi.exception.SubscriptionNotFoundException;
+import org.example.filemonitoringapi.watcher.FileWatcherService;
 import org.example.filemonitoringapi.subscription.model.CreateSubscriptionCommand;
 import org.example.filemonitoringapi.subscription.model.Subscription;
 import org.example.filemonitoringapi.subscription.model.SubscriptionDto;
 import org.example.filemonitoringapi.subscription.model.SubscriptionMapper;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
 import java.util.UUID;
 
 @AllArgsConstructor
@@ -26,7 +23,6 @@ public class SubscriptionService {
     private final SubscriptionRepository subscriptionRepository;
     private final FileWatcherService fileWatcherService;
     private final SubscriptionMapper subscriptionMapper;
-    private final Logger logger = LoggerFactory.getLogger(FileWatcherService.class);
 
 
     @Transactional
@@ -39,8 +35,7 @@ public class SubscriptionService {
             subscriptionRepository.save(subscription);
             fileWatcherService.registerFileWatcher(subscription);
         } catch (FileWatcherRegistrationException e) {
-            logger.error("Błąd podczas rejestracji FileWatcher: " + e.getMessage(), e);
-
+            throw new SubscriptionCreationException("Nie udało się utworzyć subskrypcji", e);
         }
 
         return subscriptionMapper.toDTO(subscription);
@@ -49,8 +44,7 @@ public class SubscriptionService {
 
     @Transactional
     public boolean cancelSubscription(String jobId) {
-        Subscription subscription = subscriptionRepository.findByJobId(jobId)
-                .orElseThrow(() -> new EntityNotFoundException("Nie ma takiej subskrypcji o id: " + jobId));
+        Subscription subscription = subscriptionRepository.findByJobId(jobId).orElseThrow(() -> new SubscriptionNotFoundException("Nie ma takiej subskrypcji o id: " + jobId));
 
         fileWatcherService.unregisterFileWatcher(subscription);
         subscriptionRepository.delete(subscription);
@@ -59,9 +53,14 @@ public class SubscriptionService {
 
     @Transactional(readOnly = true)
     public SubscriptionDto getSubscriptionByJobId(String jobId) {
-        Subscription subscription = subscriptionRepository.findByJobId(jobId)
-                .orElseThrow(() -> new EntityNotFoundException("Nie ma takiej subskrypcji o id: " + jobId));
+        Subscription subscription = subscriptionRepository.findByJobId(jobId).orElseThrow(() -> new SubscriptionNotFoundException("Nie ma takiej subskrypcji o id: " + jobId));
         return subscriptionMapper.toDTO(subscription);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean getSubscriptionStatusByJobId(String jobId) {
+        Subscription subscription = subscriptionRepository.findByJobId(jobId).orElseThrow(() -> new SubscriptionNotFoundException("Nie ma takiej subskrypcji o id: " + jobId));
+        return subscription.isActive();
     }
 
     @Transactional(readOnly = true)

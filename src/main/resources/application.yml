@@ -1,5 +1,5 @@
 server:
-  port: 8081
+  port: 8080
 
 spring:
   datasource:
@@ -31,3 +31,11 @@ spring:
           starttls:
             enable: true
     test-connection: false
+
+  rabbitmq:
+    addresses: localhost:5672
+    username: test
+    password: test
+
+rabbit:
+  mailQueueName: mail_details_queue
